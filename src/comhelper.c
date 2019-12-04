@@ -125,8 +125,10 @@ static HINSTANCE dllInstance  = NULL;
 static int       serverCount  = 0;
 static LONG      dllUseCount  = 0;
 static LONG      dllLockCount = 0;
+static CRITICAL_SECTION csCount;
 
 #define ERR_COMHELPER_VERBOSE
+
 static void err_comMisc(LPCSTR fmt, REFCLSID rclsid, REFIID riid) {
     #ifdef ERR_COMHELPER_VERBOSE
     CHAR bufclsid[GUIDSTR_SIZE+1] = {};
@@ -149,6 +151,8 @@ void cbase_init(HINSTANCE hinst, const COMDesc** cobjArr, int nrObjects) {
     dllInstance = hinst;
     serverList = cobjArr;
     serverCount = nrObjects;
+    //does not return value, but can throw exception STATUS_NO_MEMORY
+    InitializeCriticalSection(&csCount);
 }
 
 HRESULT cbase_createInstance(const COMDesc* conf, void** ppv, BOOL isFactory) {
@@ -169,8 +173,10 @@ HRESULT cbase_createInstance(const COMDesc* conf, void** ppv, BOOL isFactory) {
     if (FAILED(hr)) {
         GlobalFree(obj);
     } else {
-        InterlockedIncrement(&dllUseCount);
+        EnterCriticalSection(&csCount);
+        dllUseCount++;
         *ppv = (void*)obj;
+        LeaveCriticalSection(&csCount);
     }
     return hr;
 }
@@ -202,9 +208,11 @@ ULONG   STDMETHODCALLTYPE cbase_UnkAddRef(COMGenerObj* self) {
 ULONG   STDMETHODCALLTYPE cbase_UnkRelease(COMGenerObj* self) {
     const COMDesc* pco = self->conf;
     if((--self->count) == 0) {
+        EnterCriticalSection(&csCount);
         if (pco->cbDestruct && !self->isFactory) pco->cbDestruct(self, pco->rclsid, NULL);
         GlobalFree(self);
-        InterlockedDecrement(&dllUseCount);
+        dllUseCount--;
+        LeaveCriticalSection(&csCount);
         return 0;
     }
     
@@ -234,7 +242,13 @@ static HRESULT STDMETHODCALLTYPE cbase_FactCreateInstance(COMGenerObj* self, IUn
 }
 
 static HRESULT STDMETHODCALLTYPE cbase_FactLockServer(COMGenerObj* self, BOOL flock) {
-    flock ? InterlockedIncrement(&dllLockCount) : InterlockedDecrement(&dllLockCount);
+    EnterCriticalSection(&csCount);
+    if (flock) {
+        dllLockCount++;
+    } else {
+        if (dllLockCount > 0) dllUseCount--;
+    }
+    LeaveCriticalSection(&csCount);
     return S_OK;
 }
 
@@ -265,9 +279,13 @@ HRESULT WINAPI cbase_DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv)
 }
 
 HRESULT WINAPI cbase_DllCanUnloadNow() {
-    if (!dllInstance) return err_comNotInit();
+    HRESULT ret;
     
-    return (dllUseCount==0 && dllLockCount==0) ? S_OK : S_FALSE;
+    if (!dllInstance) return err_comNotInit();
+    EnterCriticalSection(&csCount);
+    ret = (dllUseCount==0 && dllLockCount==0) ? S_OK : S_FALSE;
+    LeaveCriticalSection(&csCount);
+    return ret;
 }
 
 HRESULT WINAPI cbase_DllUnregisterServer() {
