@@ -126,6 +126,20 @@ static int       serverCount  = 0;
 static LONG      dllUseCount  = 0;
 static LONG      dllLockCount = 0;
 
+#define ERR_COMHELPER_VERBOSE
+static void err_comMisc(LPCSTR fmt, REFCLSID rclsid, REFIID riid) {
+    #ifdef ERR_COMHELPER_VERBOSE
+    CHAR bufclsid[GUIDSTR_SIZE+1] = {};
+    CHAR bufiid[GUIDSTR_SIZE+1] = {};
+    CHAR bufstr[256];
+    
+    if (rclsid) chelp_GUID2strA(bufclsid, rclsid);
+    if (riid)   chelp_GUID2strA(bufiid, riid);
+    wsprintfA(bufstr, fmt, rclsid, riid);
+    OutputDebugStringA(bufstr);
+    #endif
+}
+
 static HRESULT err_comNotInit() {
     OutputDebugStringA("COM-base was not initialized prior.");
     return E_FAIL;
@@ -172,6 +186,12 @@ HRESULT STDMETHODCALLTYPE cbase_UnkQueryInterface(COMGenerObj* self, REFIID riid
         cbase_UnkAddRef(self);
         *ppv = (void*)self;
         return S_OK;
+    } else {
+        if (!self->isFactory) {
+            err_comMisc("Object->QueryInterface of CLSID %1$s does not recognize IID %2$s.", self->conf->rclsid, riid);
+        } else {
+            err_comMisc("Factory->QueryInterface was not asked for a factory IID.", NULL, NULL);
+        }
     }
 
     return E_NOINTERFACE;
@@ -199,10 +219,16 @@ static HRESULT STDMETHODCALLTYPE cbase_FactCreateInstance(COMGenerObj* self, IUn
     const COMDesc* pco = self->conf;
     if(!ppv) return E_POINTER;
     *ppv = NULL;
-    if(pUnkOuter) return CLASS_E_NOAGGREGATION; //what do we even do with this?
+    if(pUnkOuter) {
+        //what do we even do with this?
+        err_comMisc("Factory->CreateInstance of CLSID %1$s, with IID %2$s, demands aggregation.", self->conf->rclsid, riid);
+        return CLASS_E_NOAGGREGATION;
+    }
     
     if (chelp_cmpMultGUID(riid, pco->riidArr, pco->iidCount)) {
         return cbase_createInstance(pco, ppv, FALSE);
+    } else {
+        err_comMisc("Factory->CreateInstance of CLSID %1$s does not recognize IID %2$s.", self->conf->rclsid, riid);
     }
     return E_NOINTERFACE;
 }
@@ -227,10 +253,13 @@ HRESULT WINAPI cbase_DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv)
         if (IsEqualGUID(rclsid, pco->rclsid)) {
             if (chelp_cmpMultGUID(riid, &factoryIIDList, 2)) {
                 return cbase_createInstance(pco, ppv, TRUE);
+            } else {
+                err_comMisc("DllGetClassObject was not asked for a factory IID.", NULL, NULL);
             }
             return E_NOINTERFACE;
         }
     }
+    err_comMisc("DllGetClassObject does not recognize CLSID %1$s", rclsid, NULL);
 
     return CLASS_E_CLASSNOTAVAILABLE; 
 }
