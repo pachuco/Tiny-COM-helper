@@ -8,7 +8,9 @@ set opts=-std=c99 -Os -Wall -Wextra
 
 set PATH=%PATH%;%gccbase%;%fbcbase%
 del bin\comhelper.o
+del bin\combase.o
 del bin\libcomhelper.a
 
 gcc -c src\comhelper.c -o bin\comhelper.o %opts% 2> err_chelper.log
-ar r bin\libcomhelper.a bin\comhelper.o
+gcc -c src\combase.c -o bin\combase.o %opts% 2> err_chelper.log
+ar r bin\libcomhelper.a bin\comhelper.o bin\combase.o
