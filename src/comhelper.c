@@ -147,6 +147,15 @@ static HRESULT err_comNotInit() {
     return E_FAIL;
 }
 
+void cbase_destroy() {
+    serverList = NULL;
+    dllInstance = NULL;
+    serverCount = 0;
+    dllUseCount = 0;
+    dllLockCount = 0;
+    DeleteCriticalSection(&csCount);
+}
+
 void cbase_init(HINSTANCE hinst, const COMDesc** cobjArr, int nrObjects) {
     dllInstance = hinst;
     serverList = cobjArr;

@@ -76,8 +76,10 @@ struct COMGenerObj {
     int            count;      //Reference count for object
 } _COMGenerObj;
 
-//Must be called from DllMain before any other cbase_* API is used.
+//Must be called from DllMain on DLL_PROCESS_ATTACH.
 void cbase_init(HINSTANCE hinst, const COMDesc** cobjArr, int nrObjects);
+//Must be called from DllMain on DLL_PROCESS_DETACH.
+void cbase_destroy();
 
 //Creates instance of a COM object or its factory
 HRESULT cbase_createInstance(const COMDesc* conf, void** ppv, BOOL isFactory);
@@ -109,9 +111,10 @@ extern "C"
   declare function chelp_cmpMultGUID(p1 as GUID ptr, pp2 as GUID ptr ptr, count as long) as BOOL
   declare function chelp_unregisterCOM(ownershipMark as LPCSTR, pGuid as REFCLSID) as BOOL
   declare function chelp_registerCOM(ownershipMark as LPCSTR, pGuid as REFCLSID, pszDllPath as LPCSTR, isExpandable as BOOL, pszThreadModel as LPCSTR, pszDescription as LPCSTR) as BOOL
+  
+  type CbaseCB as function(self as any ptr, rclsid as REFCLSID, extraData as any ptr) as HRESULT
 end extern
 
-type CbaseCB as function(self as any ptr, rclsid as REFCLSID, extraData as any ptr) as HRESULT
 
 type COMDesc
   rclsid as REFCLSID
@@ -136,6 +139,7 @@ end type
 
 extern "C"
   declare sub cbase_init(hinst as HINSTANCE, cobjArr as const COMDesc ptr ptr, nrObjects as long)
+  declare sub cbase_destroy()
   declare function cbase_createInstance(conf as const COMDesc ptr, ppv as any ptr ptr, isFactory as BOOL) as HRESULT
 end extern
 
