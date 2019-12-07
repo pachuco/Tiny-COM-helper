@@ -12,5 +12,5 @@ del bin\combase.o
 del bin\libcomhelper.a
 
 gcc -c src\comhelper.c -o bin\comhelper.o %opts% 2> err_chelper.log
-gcc -c src\combase.c -o bin\combase.o %opts% 2> err_chelper.log
+gcc -c src\combase.c -o bin\combase.o %opts% 2> err_cbase.log
 ar r bin\libcomhelper.a bin\comhelper.o bin\combase.o
