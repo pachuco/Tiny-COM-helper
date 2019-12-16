@@ -90,6 +90,7 @@ static const COMDesc factoryDesc = {
 
 static const COMDesc** serverList  = NULL;
 static HINSTANCE dllInstance  = NULL;
+static BOOL      isInit       = FALSE;
 static int       serverCount  = 0;
 static LONG      dllUseCount  = 0;
 static LONG      dllLockCount = 0;
@@ -116,6 +117,7 @@ static HRESULT err_comNotInit() {
 }
 
 void cbase_destroy() {
+    isInit = FALSE;
     serverList = NULL;
     dllInstance = NULL;
     serverCount = 0;
@@ -125,6 +127,7 @@ void cbase_destroy() {
 }
 
 void cbase_init(HINSTANCE hinst, const COMDesc** cobjArr, int nrObjects) {
+    isInit = TRUE;
     dllInstance = hinst;
     serverList = cobjArr;
     serverCount = nrObjects;
@@ -137,6 +140,7 @@ HRESULT cbase_createInstance(const COMDesc* conf, void** ppv, BOOL isFactory) {
     const COMDesc* pco = isFactory ? &factoryDesc : conf;
     COMGenerObj* obj;
     
+    if (!isInit) return err_comNotInit();
     if(!ppv) return E_POINTER;
     *ppv = NULL;
     obj = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, pco->objSize);
@@ -146,9 +150,9 @@ HRESULT cbase_createInstance(const COMDesc* conf, void** ppv, BOOL isFactory) {
     obj->conf = conf;
     obj->isFactory = isFactory;
     cbase_UnkAddRef(obj);
-    if (pco->cbConstruct && !obj->isFactory) hr = pco->cbConstruct(obj, pco->rclsid, NULL);
+    if (pco->cbConstruct && !obj->isFactory) hr = pco->cbConstruct(obj, pco->rclsid);
     if (FAILED(hr)) {
-        GlobalFree(obj);
+        cbase_UnkRelease(obj);
     } else {
         EnterCriticalSection(&csCount);
         dllUseCount++;
@@ -180,20 +184,21 @@ HRESULT STDMETHODCALLTYPE cbase_UnkQueryInterface(COMGenerObj* self, REFIID riid
     return E_NOINTERFACE;
 }
 ULONG   STDMETHODCALLTYPE cbase_UnkAddRef(COMGenerObj* self) {
-    return ++self->count;
+    return _InterlockedIncrement(&self->count);
 }
 ULONG   STDMETHODCALLTYPE cbase_UnkRelease(COMGenerObj* self) {
     const COMDesc* pco = self->conf;
-    if((--self->count) == 0) {
+    ULONG count = _InterlockedDecrement(&self->count);
+    if((count) == 0) {
         EnterCriticalSection(&csCount);
-        if (pco->cbDestruct && !self->isFactory) pco->cbDestruct(self, pco->rclsid, NULL);
+        if (pco->cbDestruct && !self->isFactory) pco->cbDestruct(self, pco->rclsid);
         GlobalFree(self);
         dllUseCount--;
         LeaveCriticalSection(&csCount);
         return 0;
     }
     
-    return self->count;
+    return count;
 }
 
 
@@ -234,7 +239,7 @@ static HRESULT STDMETHODCALLTYPE cbase_FactLockServer(COMGenerObj* self, BOOL fl
 //DLL hooks
 
 HRESULT WINAPI cbase_DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
-    if (!dllInstance) return err_comNotInit();
+    if (!isInit) return err_comNotInit();
     if(!ppv) return E_POINTER;
     *ppv = NULL;
     
@@ -258,7 +263,7 @@ HRESULT WINAPI cbase_DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv)
 HRESULT WINAPI cbase_DllCanUnloadNow() {
     HRESULT ret;
     
-    if (!dllInstance) return err_comNotInit();
+    if (!isInit) return err_comNotInit();
     EnterCriticalSection(&csCount);
     ret = (dllUseCount==0 && dllLockCount==0) ? S_OK : S_FALSE;
     LeaveCriticalSection(&csCount);
@@ -266,7 +271,7 @@ HRESULT WINAPI cbase_DllCanUnloadNow() {
 }
 
 HRESULT WINAPI cbase_DllUnregisterServer() {
-    if (!dllInstance) return err_comNotInit();
+    if (!isInit) return err_comNotInit();
     
     for (int i=0; i < serverCount; i++) {
         chelp_unregisterCOM(serverList[i]->ownMark, serverList[i]->rclsid);
@@ -276,7 +281,7 @@ HRESULT WINAPI cbase_DllUnregisterServer() {
 }
 
 HRESULT WINAPI cbase_DllRegisterServer() {
-    if (!dllInstance) return err_comNotInit();
+    if (!isInit) return err_comNotInit();
     
     #define CHK(x) if (!(x)) goto FAIL
     char modulePath[MAX_PATH];
